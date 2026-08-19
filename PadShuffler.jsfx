@@ -1,0 +1,160 @@
+desc: Pad Shuffle Sampler (Animated Lever)
+import MusicTechProject/shuffle_engine.jsfx-inc
+
+@init
+// initialize memory and engine state
+SHUFFLE_MEM_BASE = 100000;
+PAD_COUNT = 16;
+SAMPLE_COUNT = 40;
+sh_configure(SHUFFLE_MEM_BASE, PAD_COUNT, SAMPLE_COUNT, 1, 1, 1, 64);
+
+// --- animation system ---
+anim_active = 0;   // 0 = resting, 1 = lever moving
+anim_timer = 0;    // frame counter for animation
+anim_duration = 30; // total duration in frames (about 0.5s at 60fps)
+
+@block
+// midi input handling...
+
+@sample
+// audio processing...
+
+@gfx 600 500
+
+// draw background
+gfx_r = 0.15; gfx_g = 0.15; gfx_b = 0.15;
+gfx_rect(0, 0, gfx_w, gfx_h);
+
+// --- drag logic ---
+
+// global mouse state
+left_click = mouse_cap & 1;
+click_down = left_click && !last_left_click;
+
+// lever geometric boundaries
+lever_box_x = 450;
+lever_box_y = 70;
+lever_box_w = 80;
+lever_box_h = 300;
+
+slot_x = lever_box_x + 20;
+slot_y = lever_box_y + 10;
+slot_w = 20;
+slot_h = lever_box_h - 20;
+
+// detect drag start or pad click
+click_down ? (
+    mouse_x > lever_box_x && mouse_x < lever_box_x + lever_box_w &&
+    mouse_y > lever_box_y && mouse_y < lever_box_y + lever_box_h ? (
+        is_dragging = 1;
+        has_triggered = 0; // reset safety lock
+    ) : (
+        // check pad clicks
+        pad_idx = 0;
+        loop(16,
+            row = (pad_idx / 4) | 0;
+            col = pad_idx % 4;
+            px = 10 + (col * 60);
+            py = 70 + (row * 60);
+            
+            mouse_x > px && mouse_x < px + 50 &&
+            mouse_y > py && mouse_y < py + 50 ? (
+                sh_toggle_lock(pad_idx);
+            );
+            pad_idx += 1;
+        );
+    );
+);
+
+// process active drag
+is_dragging ? (
+
+    // if mouse released, stop dragging and snap back
+    !left_click ? (
+        is_dragging = 0;
+        pull_amount = 0;
+        has_triggered ? (
+            sh_commit_all();
+            has_triggered = 0;
+        );
+    ) : (
+        // calculate how far down slot mouse is (0.0 to 1.0)
+        raw_pull = (mouse_y - slot_y) / slot_h;
+
+        // clamp value so it doesn't exceed 0 or 1
+        pull_amount = max(0, min(1, raw_pull));
+
+        // trigger shuffle engine if bottom reached (95% or more)
+        pull_amount >= 0.95 && !has_triggered ? (
+            sh_prepare();
+            has_triggered = 1; // lock so it doesn't fire repeatedly
+        );
+    );
+) : (
+    // ensure lever stays at top when not interacting
+    pull_amount = 0;
+);
+
+last_left_click = left_click; // save state for next frame
+
+// --- drawing graphics ---
+
+// --- draw lever ---
+gfx_r = 0.05; gfx_g = 0.05; gfx_b = 0.05; // black slot
+gfx_rect(slot_x, slot_y, slot_w, slot_h);
+
+// calculate dynamic lever y position based on drag
+handle_base_y = slot_y + (slot_h * 0.1);
+handle_range = slot_h * 0.7;
+handle_h = 40;
+handle_current_y = handle_base_y + (handle_range * pull_amount);
+
+// arm
+gfx_r = 0.4; gfx_g = 0.4; gfx_b = 0.4; // silver arm
+gfx_rect(slot_x, handle_current_y, 20, handle_h);
+
+// knob
+knob_r = 20;
+knob_x = slot_x + (slot_w / 2);
+knob_y = handle_current_y - knob_r + (handle_h / 2);
+
+gfx_r = 0.8; gfx_g = 0.1; gfx_b = 0.1; // red
+gfx_circle(knob_x, knob_y, knob_r, 1);
+
+// lever text
+gfx_r = 1; gfx_g = 1; gfx_b = 1;
+gfx_x = lever_box_x + 5; gfx_y = lever_box_y - 20;
+gfx_drawstr("DRAG DOWN");
+
+// --- draw 16 pads ---
+pad = 0;
+loop(16,
+    row = (pad / 4) | 0;
+    col = pad % 4;
+    x_pos = 10 + (col * 60);
+    y_pos = 70 + (row * 60);
+
+    sh_get_lock(pad) ? (
+        gfx_r = 0.5; gfx_g = 0.2; gfx_b = 0.2; // locked color (reddish)
+    ) : (
+        gfx_r = 0.25; gfx_g = 0.25; gfx_b = 0.3; // normal color
+    );
+    gfx_rect(x_pos, y_pos, 50, 50);
+
+    display_val = sh_has_pending() ? sh_get_pending(pad) : sh_get_current(pad);
+
+    gfx_r = 1; gfx_g = 1; gfx_b = 1;
+    gfx_x = x_pos + 15;
+    gfx_y = y_pos + 20;
+
+    gfx_drawnumber(display_val, 0);
+
+    sh_get_lock(pad) ? (
+        gfx_x = x_pos + 2;
+        gfx_y = y_pos + 2;
+        gfx_r = 0.9; gfx_g = 0.9; gfx_b = 0.9;
+        gfx_drawstr("L");
+    );
+
+    pad += 1;
+);

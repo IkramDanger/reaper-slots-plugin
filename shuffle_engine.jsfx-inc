@@ -1,0 +1,289 @@
+@init
+
+function sh_sample_is_valid(sample_id)
+(
+    sample_id >= 0 && sample_id < sh_sample_count;
+);
+
+function sh_pad_is_valid(pad)
+(
+    pad >= 0 && pad < sh_pad_count;
+);
+
+function sh_candidate_is_allowed(candidate, current_sample)
+local(allowed)
+(
+    allowed = sh_sample_is_valid(candidate);
+
+    allowed && sh_avoid_current && sh_sample_count > 1 && candidate == current_sample ? (
+        allowed = 0;
+    );
+
+    allowed && sh_avoid_duplicates && sh_used_base[candidate] ? (
+        allowed = 0;
+    );
+
+    allowed;
+);
+
+function sh_choose_sample_for_pad(pad)
+local(current_sample, candidate, attempts, index, allowed)
+(
+    current_sample = sh_current_base[pad];
+    candidate = -1;
+    attempts = 0;
+
+    while (candidate < 0 && attempts < sh_max_attempts) (
+        index = min(sh_sample_count - 1, floor(rand(sh_sample_count)));
+
+        sh_candidate_is_allowed(index, current_sample) ? (
+            candidate = index;
+        );
+
+        attempts += 1;
+    );
+
+    candidate < 0 ? (
+        index = 0;
+
+        while (candidate < 0 && index < sh_sample_count) (
+            sh_candidate_is_allowed(index, current_sample) ? (
+                candidate = index;
+            );
+
+            index += 1;
+        );
+    );
+
+    candidate < 0 ? (
+        index = 0;
+
+        while (candidate < 0 && index < sh_sample_count) (
+            allowed = 1;
+
+            sh_avoid_current && sh_sample_count > 1 && index == current_sample ? (
+                allowed = 0;
+            );
+
+            allowed ? (
+                candidate = index;
+            );
+
+            index += 1;
+        );
+    );
+
+    candidate < 0 && sh_sample_count > 0 ? (
+        candidate = 0;
+    );
+
+    candidate;
+);
+
+function sh_configure(mem_base, pad_count, sample_count, use_locks, avoid_current, avoid_duplicates, max_attempts)
+local(pad, initial_sample)
+(
+    sh_mem_base = max(0, floor(mem_base));
+    sh_pad_count = max(0, floor(pad_count));
+    sh_sample_count = max(0, floor(sample_count));
+    sh_use_locks = use_locks ? 1 : 0;
+    sh_avoid_current = avoid_current ? 1 : 0;
+    sh_avoid_duplicates = avoid_duplicates ? 1 : 0;
+    sh_max_attempts = max(1, floor(max_attempts));
+
+    sh_current_base = sh_mem_base;
+    sh_pending_base = sh_current_base + sh_pad_count;
+    sh_previous_base = sh_pending_base + sh_pad_count;
+    sh_locked_base = sh_previous_base + sh_pad_count;
+    sh_used_base = sh_locked_base + sh_pad_count;
+    sh_mem_end = sh_used_base + sh_sample_count;
+
+    sh_mem_end > sh_mem_base ? (
+        memset(sh_mem_base, 0, sh_mem_end - sh_mem_base);
+    );
+
+    pad = 0;
+
+    loop(sh_pad_count,
+        initial_sample = sh_sample_count > 0 ? pad % sh_sample_count : -1;
+
+        sh_current_base[pad] = initial_sample;
+        sh_pending_base[pad] = initial_sample;
+        sh_previous_base[pad] = initial_sample;
+        sh_locked_base[pad] = 0;
+
+        pad += 1;
+    );
+
+    sh_pending_valid = 0;
+    sh_error = 0;
+    sh_generation = 0;
+    sh_configured = 1;
+
+    sh_mem_end;
+);
+
+function sh_prepare()
+local(pad, candidate, current_sample, pad_is_locked)
+(
+    sh_error = 0;
+    sh_pending_valid = 0;
+
+    !sh_configured ? (
+        sh_error = 3;
+    ) :
+    sh_pad_count <= 0 ? (
+        sh_error = 1;
+    ) :
+    sh_sample_count <= 0 ? (
+        sh_error = 2;
+    ) : (
+        memcpy(sh_previous_base, sh_current_base, sh_pad_count);
+        memcpy(sh_pending_base, sh_current_base, sh_pad_count);
+        memset(sh_used_base, 0, sh_sample_count);
+
+        sh_use_locks && sh_avoid_duplicates ? (
+            pad = 0;
+
+            loop(sh_pad_count,
+                sh_locked_base[pad] ? (
+                    current_sample = sh_current_base[pad];
+
+                    sh_sample_is_valid(current_sample) ? (
+                        sh_used_base[current_sample] = 1;
+                    );
+                );
+
+                pad += 1;
+            );
+        );
+
+        pad = 0;
+
+        loop(sh_pad_count,
+            pad_is_locked = sh_use_locks ? sh_locked_base[pad] : 0;
+
+            pad_is_locked ? (
+                sh_pending_base[pad] = sh_current_base[pad];
+            ) : (
+                candidate = sh_choose_sample_for_pad(pad);
+                sh_pending_base[pad] = candidate;
+
+                sh_avoid_duplicates && sh_sample_is_valid(candidate) ? (
+                    sh_used_base[candidate] = 1;
+                );
+            );
+
+            pad += 1;
+        );
+
+        sh_pending_valid = 1;
+        sh_generation += 1;
+    );
+
+    sh_error;
+);
+
+function sh_commit_pad(pad)
+(
+    sh_pending_valid && sh_pad_is_valid(pad) ? (
+        sh_current_base[pad] = sh_pending_base[pad];
+        1;
+    ) : (
+        0;
+    );
+);
+
+function sh_commit_all()
+(
+    sh_pending_valid ? (
+        memcpy(sh_current_base, sh_pending_base, sh_pad_count);
+        sh_pending_valid = 0;
+        1;
+    ) : (
+        0;
+    );
+);
+
+function sh_finish_commit()
+(
+    sh_pending_valid = 0;
+);
+
+function sh_undo()
+(
+    sh_configured && sh_pad_count > 0 ? (
+        memcpy(sh_current_base, sh_previous_base, sh_pad_count);
+        memcpy(sh_pending_base, sh_current_base, sh_pad_count);
+        sh_pending_valid = 0;
+        1;
+    ) : (
+        0;
+    );
+);
+
+function sh_set_current(pad, sample_id)
+(
+    sh_pad_is_valid(pad) && sh_sample_is_valid(sample_id) ? (
+        sh_current_base[pad] = sample_id;
+        sh_pending_base[pad] = sample_id;
+        1;
+    ) : (
+        0;
+    );
+);
+
+function sh_get_current(pad)
+(
+    sh_pad_is_valid(pad) ? sh_current_base[pad] : -1;
+);
+
+function sh_get_pending(pad)
+(
+    sh_pad_is_valid(pad) && sh_pending_valid ? sh_pending_base[pad] : -1;
+);
+
+function sh_set_lock(pad, state)
+(
+    sh_pad_is_valid(pad) && sh_use_locks ? (
+        sh_locked_base[pad] = state ? 1 : 0;
+        1;
+    ) : (
+        0;
+    );
+);
+
+function sh_toggle_lock(pad)
+(
+    sh_pad_is_valid(pad) && sh_use_locks ? (
+        sh_locked_base[pad] = !sh_locked_base[pad];
+        sh_locked_base[pad];
+    ) : (
+        -1;
+    );
+);
+
+function sh_get_lock(pad)
+(
+    sh_pad_is_valid(pad) && sh_use_locks ? sh_locked_base[pad] : 0;
+);
+
+function sh_has_pending()
+(
+    sh_pending_valid;
+);
+
+function sh_get_error()
+(
+    sh_error;
+);
+
+function sh_get_generation()
+(
+    sh_generation;
+);
+
+function sh_get_memory_end()
+(
+    sh_mem_end;
+);
