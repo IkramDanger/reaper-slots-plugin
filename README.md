@@ -2,7 +2,7 @@
 
 A slot-machine style, interactive sample randomizer built specifically for REAPER! This script provides a fun, visual way to generate random kits, preview sounds, and insert them directly into your music production timeline.
 
-## 📂 Folder Structure & Audio Setup
+##  Folder Structure & Audio Setup
 
 To ensure the script works correctly, you must maintain a specific folder structure. You can place the main project folder anywhere on your computer (e.g., Desktop, Documents), as long as the internal structure remains intact.
 
@@ -27,7 +27,7 @@ The script automatically reads the folders inside the `Audio files/` directory a
 
 ---
 
-## 🚀 How to Run the Plugin in REAPER
+##  How to Run the Plugin in REAPER
 
 Because this tool interacts deeply with your REAPER timeline (inserting files, dynamic UI), it runs as a **ReaScript**, not a traditional JSFX plugin.
 
@@ -40,7 +40,7 @@ Because this tool interacts deeply with your REAPER timeline (inserting files, d
 
 ---
 
-## 🎮 How to Use the Interface
+##  How to Use the Interface
 
 * **Kits Sidebar (Left):** Click any folder name in the sidebar to instantly load those sounds.
 * **The Lever (Right):** Click and drag the red knob all the way down and release it to randomize all unlocked pads with a slot-machine cascading spin animation.
